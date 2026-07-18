@@ -38,4 +38,3 @@ ditto "$tmp/extracted/Context.app" "$DEST"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 
 echo "Installed $DEST"
-echo "Requires macOS 26+ and Ollama running locally (https://ollama.com)."

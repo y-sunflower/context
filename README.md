@@ -1,14 +1,8 @@
-<p align="center">
-  <img src="assets/logo.png" alt="Context" width="640">
-</p>
+# context
 
-# Context
+A native macOS chat app for local AI models. 
 
-A 100% local macOS chat app for [Ollama](https://ollama.com) models. Rust core
-(chat streaming via [ollama-rs](https://crates.io/crates/ollama-rs), history in
-SQLite via rusqlite) exposed to a native SwiftUI frontend through
-[UniFFI](https://mozilla.github.io/uniffi-rs/). No network access except
-`localhost:11434`.
+It works via a rust core (chat streaming via `ollama-rs`, history in `SQLite` via `rusqlite`) exposed to a native `SwiftUI` frontend through `UniFFI`.
 
 <br>
 
