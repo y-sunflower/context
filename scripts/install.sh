@@ -21,8 +21,13 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading the latest Context release…"
-curl -fsSL -o "$tmp/$ASSET" \
-    "https://github.com/$REPO/releases/latest/download/$ASSET"
+if ! curl -fsSL -o "$tmp/$ASSET" \
+    "https://github.com/$REPO/releases/latest/download/$ASSET"; then
+    echo "error: could not download $ASSET from the latest release." >&2
+    echo "There may be no published release yet (or a release build is still running):" >&2
+    echo "  https://github.com/$REPO/releases" >&2
+    exit 1
+fi
 
 ditto -x -k "$tmp/$ASSET" "$tmp/extracted"
 [ -d "$tmp/extracted/Context.app" ] || { echo "error: unexpected archive layout" >&2; exit 1; }
