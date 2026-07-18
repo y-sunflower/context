@@ -26,7 +26,9 @@ impl ChatListener for PrintListener {
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let db_path = args.next().expect("usage: smoke <db_path> <model> <prompt>");
+    let db_path = args
+        .next()
+        .expect("usage: smoke <db_path> <model> <prompt>");
     let model = args.next().expect("missing model");
     let prompt = args.next().expect("missing prompt");
 
@@ -47,7 +49,11 @@ fn main() {
         Ok(Ok(message)) => {
             println!("\n--- complete: {} chars persisted", message.content.len());
             let history = core.get_messages(conversation.id).expect("history");
-            println!("--- {} messages in conversation {}", history.len(), conversation.id);
+            println!(
+                "--- {} messages in conversation {}",
+                history.len(),
+                conversation.id
+            );
         }
         Ok(Err(e)) => {
             eprintln!("\n--- stream error: {e}");

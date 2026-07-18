@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  MACOSX_DEPLOYMENT_TARGET: "26.0"
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: extractions/setup-just@v3
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Stamp version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          plutil -replace CFBundleShortVersionString -string "$VERSION" app/Info.plist
+          plutil -replace CFBundleVersion -string "$VERSION" app/Info.plist
+
+      - name: Build app bundle
+        run: just bundle
+
+      - name: Zip the app
+        run: ditto -c -k --keepParent dist/Context.app Context-arm64.zip
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Context-arm64.zip
+          generate_release_notes: true

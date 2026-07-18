@@ -86,7 +86,11 @@ impl ContextCore {
         self.db.delete_conversation(conversation_id)
     }
 
-    pub fn rename_conversation(&self, conversation_id: i64, title: String) -> Result<(), CoreError> {
+    pub fn rename_conversation(
+        &self,
+        conversation_id: i64,
+        title: String,
+    ) -> Result<(), CoreError> {
         self.db.rename_conversation(conversation_id, &title)
     }
 

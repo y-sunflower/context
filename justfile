@@ -54,6 +54,16 @@ bundle: build
 run: bundle
     open {{ bundle }}
 
+# Build and install into /Applications
+install: bundle
+    rm -rf /Applications/{{ app_name }}.app
+    ditto {{ bundle }} /Applications/{{ app_name }}.app
+    @echo "installed /Applications/{{ app_name }}.app"
+
+# Remove the app from /Applications (keeps your chat history)
+uninstall:
+    rm -rf /Applications/{{ app_name }}.app
+
 # Build, bundle, and run in the foreground (logs on stdout)
 dev: bundle
     ./{{ bundle }}/Contents/MacOS/{{ app_name }}

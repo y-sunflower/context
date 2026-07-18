@@ -6,7 +6,23 @@ SQLite via rusqlite) exposed to a native SwiftUI frontend through
 [UniFFI](https://mozilla.github.io/uniffi-rs/). No network access except
 `localhost:11434`.
 
-## Requirements
+## Install
+
+Apple Silicon, macOS 26+, with [Ollama](https://ollama.com) running locally:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/JosephBARBIERDARNAL/context/main/scripts/install.sh | sh
+```
+
+This drops the latest release into `/Applications`. If you'd rather download
+manually, grab `Context-arm64.zip` from the
+[releases page](https://github.com/JosephBARBIERDARNAL/context/releases),
+unzip into `/Applications`, and on first launch approve it under
+System Settings → Privacy & Security (the app is ad-hoc signed, not notarized).
+
+To build and install from source instead: `git clone`, then `just install`.
+
+## Requirements (building from source)
 
 - macOS 26+ (Liquid Glass UI)
 - Xcode Command Line Tools (Swift 6.2+) — full Xcode not required
