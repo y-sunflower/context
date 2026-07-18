@@ -4,6 +4,9 @@ import PackageDescription
 let package = Package(
     name: "Context",
     platforms: [.macOS(.v26)],
+    dependencies: [
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
+    ],
     targets: [
         // Generated UniFFI C header + modulemap (see `just bindings`).
         .target(name: "ContextCoreFFI"),
@@ -11,7 +14,10 @@ let package = Package(
         .target(name: "ContextCore", dependencies: ["ContextCoreFFI"]),
         .executableTarget(
             name: "Context",
-            dependencies: ["ContextCore"],
+            dependencies: [
+                "ContextCore",
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
+            ],
             linkerSettings: [
                 .unsafeFlags(["-L", "../core/target/release"]),
                 .linkedLibrary("context_core"),

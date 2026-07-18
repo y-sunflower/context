@@ -1,4 +1,5 @@
 import AppKit
+import MarkdownUI
 import SwiftUI
 
 struct MessageBubble: View {
@@ -14,10 +15,9 @@ struct MessageBubble: View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 5) {
             HStack(alignment: .bottom) {
                 if isUser { Spacer(minLength: 70) }
-                Text(attributed)
-                    .font(.system(size: 16))
+                messageContent
+                    .font(.system(size: 18))
                     .lineSpacing(4)
-                    .textSelection(.enabled)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)
                     .glassEffect(
@@ -36,12 +36,24 @@ struct MessageBubble: View {
     private var copyButton: some View {
         Button(action: copy) {
             Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                .font(.system(size: 11))
+                .font(.system(size: 13))
                 .labelStyle(.titleAndIcon)
         }
         .buttonStyle(.glass)
         .controlSize(.small)
         .help("Copy message")
+    }
+
+    @ViewBuilder
+    private var messageContent: some View {
+        if isUser {
+            Text(content)
+                .textSelection(.enabled)
+        } else {
+            Markdown(content)
+                .markdownTheme(.gitHub)
+                .textSelection(.enabled)
+        }
     }
 
     private func copy() {
@@ -54,10 +66,4 @@ struct MessageBubble: View {
         }
     }
 
-    private var attributed: AttributedString {
-        (try? AttributedString(
-            markdown: content,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(content)
-    }
 }

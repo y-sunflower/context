@@ -9,6 +9,13 @@ extension Message: Identifiable {}
 final class AppState {
     static let defaultModel = "gemma4:26b"
 
+    enum OllamaStatus: Equatable {
+        case checking
+        case unavailable
+        case noModels
+        case ready
+    }
+
     @ObservationIgnored private var core: ContextCore?
 
     var conversations: [Conversation] = []
@@ -21,7 +28,10 @@ final class AppState {
     var isStreaming = false
     var models: [ModelInfo] = []
     var selectedModel = AppState.defaultModel
+    var ollamaStatus = OllamaStatus.checking
     var errorMessage: String?
+
+    var canStartChat: Bool { ollamaStatus == .ready }
 
     var selectedConversation: Conversation? {
         conversations.first { $0.id == selectedConversationID }
@@ -48,7 +58,7 @@ final class AppState {
     // MARK: - Conversations
 
     func newChat() {
-        guard let core else { return }
+        guard let core, canStartChat else { return }
         do {
             let conversation = try core.createConversation(model: selectedModel)
             conversations = try core.listConversations()
@@ -136,16 +146,22 @@ final class AppState {
 
     func refreshModels() async {
         guard let core else { return }
+        ollamaStatus = .checking
         do {
             models = try await core.listModels()
+            guard !models.isEmpty else {
+                ollamaStatus = .noModels
+                return
+            }
             if !models.contains(where: { $0.name == selectedModel }),
                 let first = models.first
             {
                 selectedModel = first.name
             }
+            ollamaStatus = .ready
         } catch {
-            errorMessage =
-                "Could not reach Ollama at localhost:11434 — is `ollama serve` running?"
+            models = []
+            ollamaStatus = .unavailable
         }
     }
 

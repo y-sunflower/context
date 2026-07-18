@@ -13,7 +13,8 @@ struct ContextApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Chat") { state.newChat() }
-                    .keyboardShortcut("n", modifiers: .command)
+                    .keyboardShortcut("o", modifiers: .command)
+                    .disabled(!state.canStartChat)
             }
         }
     }

@@ -72,7 +72,7 @@ private struct ThinkingIndicator: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Thinking…")
-                    .font(.system(size: 15))
+                    .font(.system(size: 17))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)

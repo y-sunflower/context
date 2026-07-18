@@ -31,14 +31,15 @@ struct SidebarView: View {
                     state.newChat()
                 }
                 .buttonStyle(.glass)
-                .help("New Chat (⌘N)")
+                .disabled(!state.canStartChat)
+                .help("New Chat (⌘O)")
             }
         }
         .overlay {
             if state.conversations.isEmpty {
                 Text("No chats yet")
                     .foregroundStyle(.secondary)
-                    .font(.callout)
+                    .font(.body)
             }
         }
         .alert("Rename Chat", isPresented: Binding(
@@ -63,10 +64,10 @@ private struct ConversationRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(conversation.title)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 16, weight: .medium))
                 .lineLimit(1)
             Text(conversation.model)
-                .font(.system(size: 12))
+                .font(.system(size: 14))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }

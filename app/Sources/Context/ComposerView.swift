@@ -14,7 +14,7 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Message \(state.selectedModel)…", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 16))
+                    .font(.system(size: 18))
                     .lineLimit(1...8)
                     .focused($focused)
                     .onSubmit(send)
