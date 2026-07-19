@@ -23,17 +23,21 @@ struct RootView: View {
                 OllamaSetupView(
                     icon: "externaldrive.badge.exclamationmark",
                     title: "Ollama isn’t available",
-                    message: "Context couldn’t connect to Ollama on this Mac. Install Ollama if you don’t have it, or open Ollama if it is already installed. Then check again."
+                    message:
+                        "Context couldn’t connect to Ollama on this Mac. Install Ollama if you don’t have it, or open Ollama if it is already installed. Then check again."
                 ) {
-                    Link("Download Ollama", destination: URL(string: "https://ollama.com/download")!)
-                        .buttonStyle(.glassProminent)
+                    Link(
+                        "Download Ollama", destination: URL(string: "https://ollama.com/download")!
+                    )
+                    .buttonStyle(.glassProminent)
                     retryButton
                 }
             case .noModels:
                 OllamaSetupView(
                     icon: "shippingbox",
                     title: "No local models found",
-                    message: "Ollama is running, but it doesn’t have a model yet. Choose a model from the Ollama library, run its pull command in Terminal, then check again."
+                    message:
+                        "Ollama is running, but it doesn’t have a model yet. Choose a model from the Ollama library, run its pull command in Terminal, then check again."
                 ) {
                     VStack(spacing: 6) {
                         Text("ollama pull <model-name>")
@@ -121,7 +125,8 @@ private struct OllamaSetupView<Actions: View>: View {
         .background {
             LinearGradient(
                 colors: [Color.accentColor.opacity(0.10), .clear],
-                startPoint: .top, endPoint: .bottom)
+                startPoint: .top, endPoint: .bottom
+            )
             .ignoresSafeArea()
         }
     }
@@ -158,7 +163,8 @@ struct EmptyStateView: View {
         .background {
             LinearGradient(
                 colors: [Color.accentColor.opacity(0.10), .clear],
-                startPoint: .top, endPoint: .bottom)
+                startPoint: .top, endPoint: .bottom
+            )
             .ignoresSafeArea()
         }
     }

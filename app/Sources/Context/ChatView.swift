@@ -20,8 +20,9 @@ struct ChatView: View {
                             isSearchTarget: highlightedMessageID == message.id,
                             onEdit: message.role == "user" && !state.isStreaming
                                 ? { state.edit(message) }
-                                : nil)
-                            .id(message.id)
+                                : nil
+                        )
+                        .id(message.id)
                     }
                     if state.isStreaming {
                         if let text = state.streamingText, !text.isEmpty {
@@ -63,7 +64,8 @@ struct ChatView: View {
                     Color.accentColor.opacity(0.02),
                     Color.clear,
                 ],
-                startPoint: .top, endPoint: .bottom)
+                startPoint: .top, endPoint: .bottom
+            )
             .ignoresSafeArea()
         }
         .safeAreaInset(edge: .bottom) {

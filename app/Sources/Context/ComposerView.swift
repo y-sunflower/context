@@ -14,14 +14,15 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 10) {
                 TextField(
                     "Message \(state.selectedModel)…", text: $state.composerDraft,
-                    axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 18))
-                    .lineLimit(1...8)
-                    .focused($focused)
-                    .onSubmit(send)
-                    .padding(.leading, 16)
-                    .padding(.vertical, 11)
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .lineLimit(1...8)
+                .focused($focused)
+                .onSubmit(send)
+                .padding(.leading, 16)
+                .padding(.vertical, 11)
 
                 Button(action: primaryAction) {
                     Image(systemName: state.isStreaming ? "stop.fill" : "arrow.up")

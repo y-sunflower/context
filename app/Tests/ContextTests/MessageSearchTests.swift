@@ -1,5 +1,6 @@
 import ContextCore
 import XCTest
+
 @testable import Context
 
 final class MessageSearchTests: XCTestCase {
@@ -24,7 +25,8 @@ final class MessageSearchTests: XCTestCase {
     }
 
     func testExcludesAndCaps() {
-        let corpus = (1...12).map { message(id: Int64($0), content: "matching text \($0)") }
+        let corpus =
+            (1...12).map { message(id: Int64($0), content: "matching text \($0)") }
             + [message(id: 20, content: "unrelated")]
         let matches = MessageSearch.matches(query: "matching", in: corpus, limit: 10)
         XCTAssertEqual(matches.count, 10)

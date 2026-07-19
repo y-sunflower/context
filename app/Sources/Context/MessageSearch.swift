@@ -37,7 +37,9 @@ enum MessageSearch {
         guard !normalizedQuery.isEmpty else { return [] }
 
         return corpus.compactMap { message -> MessageSearchMatch? in
-            guard let score = fuzzyScore(query: normalizedQuery, candidate: normalize(message.content))
+            guard
+                let score = fuzzyScore(
+                    query: normalizedQuery, candidate: normalize(message.content))
             else { return nil }
             return MessageSearchMatch(message: message, score: score)
         }
@@ -267,7 +269,8 @@ struct MessageSearchView: View {
             .padding(.vertical, 9)
             .background(
                 selectedMessageID == match.id ? Color.accentColor.opacity(0.18) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

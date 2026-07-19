@@ -42,10 +42,13 @@ struct SidebarView: View {
                     .font(.body)
             }
         }
-        .alert("Rename Chat", isPresented: Binding(
-            get: { renameTarget != nil },
-            set: { if !$0 { renameTarget = nil } }
-        )) {
+        .alert(
+            "Rename Chat",
+            isPresented: Binding(
+                get: { renameTarget != nil },
+                set: { if !$0 { renameTarget = nil } }
+            )
+        ) {
             TextField("Title", text: $renameText)
             Button("Rename") {
                 if let target = renameTarget {

@@ -25,7 +25,8 @@ struct MessageBubble: View {
                     .padding(.vertical, 11)
                     .glassEffect(
                         isUser ? .regular.tint(.accentColor.opacity(0.5)) : .regular,
-                        in: .rect(cornerRadius: 20, style: .continuous))
+                        in: .rect(cornerRadius: 20, style: .continuous)
+                    )
                     .overlay {
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
                             .stroke(Color.accentColor, lineWidth: isSearchTarget ? 3 : 0)
