@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -15,6 +16,20 @@ struct ContextApp: App {
                 Button("New Chat") { state.newChat() }
                     .keyboardShortcut("o", modifiers: .command)
                     .disabled(!state.canStartChat)
+            }
+            CommandGroup(after: .textEditing) {
+                Button("Search Messages") { state.presentMessageSearch() }
+                    .keyboardShortcut("k", modifiers: .command)
+            }
+            CommandGroup(after: .sidebar) {
+                Button("Toggle Sidebar") {
+                    NSApp.sendAction(
+                        #selector(NSSplitViewController.toggleSidebar(_:)),
+                        to: nil,
+                        from: nil
+                    )
+                }
+                .keyboardShortcut("b", modifiers: .command)
             }
         }
     }

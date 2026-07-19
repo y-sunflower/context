@@ -23,5 +23,9 @@ let package = Package(
                 .linkedLibrary("context_core"),
             ]
         ),
+        .testTarget(
+            name: "ContextTests",
+            dependencies: ["Context", "ContextCore"]
+        ),
     ]
 )

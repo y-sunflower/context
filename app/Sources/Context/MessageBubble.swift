@@ -5,7 +5,8 @@ import SwiftUI
 struct MessageBubble: View {
     let role: String
     let content: String
-    var onBranch: (() -> Void)?
+    var isSearchTarget = false
+    var onEdit: (() -> Void)?
 
     @State private var hovering = false
     @State private var hoveringActions = false
@@ -25,6 +26,13 @@ struct MessageBubble: View {
                     .glassEffect(
                         isUser ? .regular.tint(.accentColor.opacity(0.5)) : .regular,
                         in: .rect(cornerRadius: 20, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.accentColor, lineWidth: isSearchTarget ? 3 : 0)
+                            .shadow(
+                                color: Color.accentColor.opacity(isSearchTarget ? 0.45 : 0),
+                                radius: 8)
+                    }
                 if !isUser { Spacer(minLength: 70) }
             }
             actionButtons
@@ -34,15 +42,16 @@ struct MessageBubble: View {
         .onHover { hovering = $0 }
         .animation(.easeInOut(duration: 0.15), value: hovering)
         .animation(.easeInOut(duration: 0.15), value: copied)
+        .animation(.easeInOut(duration: 0.2), value: isSearchTarget)
     }
 
     private var actionButtons: some View {
         HStack(spacing: 4) {
-            if let onBranch {
+            if let onEdit {
                 actionButton(
-                    systemImage: "arrow.triangle.branch",
-                    help: "Edit this message in a new branch",
-                    action: onBranch)
+                    systemImage: "pencil",
+                    help: "Edit message",
+                    action: onEdit)
             }
             actionButton(
                 systemImage: copied ? "checkmark" : "doc.on.doc",

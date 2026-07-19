@@ -57,6 +57,13 @@ struct RootView: View {
             }
         }
         .font(.system(size: 15))
+        .overlay {
+            if state.isMessageSearchPresented {
+                MessageSearchView()
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            }
+        }
+        .animation(.easeOut(duration: 0.14), value: state.isMessageSearchPresented)
         .alert(
             "Something went wrong",
             isPresented: Binding(

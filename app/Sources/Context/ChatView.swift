@@ -3,6 +3,8 @@ import SwiftUI
 
 struct ChatView: View {
     @Environment(AppState.self) private var state
+    @State private var highlightedMessageID: Int64?
+    @State private var highlightTask: Task<Void, Never>?
 
     private let bottomAnchor = "bottom"
 
@@ -15,9 +17,11 @@ struct ChatView: View {
                         MessageBubble(
                             role: message.role,
                             content: message.content,
-                            onBranch: message.role == "user" && !state.isStreaming
-                                ? { state.branch(from: message) }
+                            isSearchTarget: highlightedMessageID == message.id,
+                            onEdit: message.role == "user" && !state.isStreaming
+                                ? { state.edit(message) }
                                 : nil)
+                            .id(message.id)
                     }
                     if state.isStreaming {
                         if let text = state.streamingText, !text.isEmpty {
@@ -35,10 +39,21 @@ struct ChatView: View {
                 proxy.scrollTo(bottomAnchor, anchor: .bottom)
             }
             .onChange(of: state.messages.count) {
-                proxy.scrollTo(bottomAnchor, anchor: .bottom)
+                if state.pendingMessageJumpID == nil {
+                    proxy.scrollTo(bottomAnchor, anchor: .bottom)
+                } else {
+                    performPendingJump(using: proxy)
+                }
+            }
+            .onChange(of: state.pendingMessageJumpID) {
+                performPendingJump(using: proxy)
             }
             .onAppear {
-                proxy.scrollTo(bottomAnchor, anchor: .bottom)
+                if state.pendingMessageJumpID == nil {
+                    proxy.scrollTo(bottomAnchor, anchor: .bottom)
+                } else {
+                    performPendingJump(using: proxy)
+                }
             }
         }
         .background {
@@ -65,6 +80,27 @@ struct ChatView: View {
                 }
                 .pickerStyle(.menu)
                 .help("Model used for the next message")
+            }
+        }
+    }
+
+    private func performPendingJump(using proxy: ScrollViewProxy) {
+        guard let messageID = state.pendingMessageJumpID,
+            state.messages.contains(where: { $0.id == messageID })
+        else { return }
+
+        highlightTask?.cancel()
+        highlightTask = Task { @MainActor in
+            await Task.yield()
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(messageID, anchor: .center)
+            }
+            highlightedMessageID = messageID
+            state.completeMessageJump(messageID)
+            try? await Task.sleep(for: .seconds(1.4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) {
+                highlightedMessageID = nil
             }
         }
     }

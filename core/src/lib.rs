@@ -44,6 +44,18 @@ pub struct Message {
     pub created_at: i64,
 }
 
+/// A persisted message plus the conversation metadata needed by global search.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct SearchableMessage {
+    pub id: i64,
+    pub conversation_id: i64,
+    pub conversation_title: String,
+    pub conversation_updated_at: i64,
+    pub role: String,
+    pub content: String,
+    pub created_at: i64,
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct ModelInfo {
     pub name: String,
@@ -98,15 +110,8 @@ impl ContextCore {
         self.db.get_messages(conversation_id)
     }
 
-    /// Create a new conversation containing the history before a selected
-    /// user message. The source conversation is left unchanged.
-    pub fn branch_conversation(
-        &self,
-        conversation_id: i64,
-        before_message_id: i64,
-    ) -> Result<Conversation, CoreError> {
-        self.db
-            .branch_conversation(conversation_id, before_message_id)
+    pub fn list_searchable_messages(&self) -> Result<Vec<SearchableMessage>, CoreError> {
+        self.db.list_searchable_messages()
     }
 
     /// Ask `conversation_id`'s current stream (if any) to stop. The partial
@@ -129,6 +134,45 @@ impl ContextCore {
         self.db.set_conversation_model(conversation_id, &model)?;
         self.db.insert_message(conversation_id, "user", &content)?;
         self.db.maybe_autotitle(conversation_id, &content)?;
+
+        let history = self.db.get_messages(conversation_id)?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.cancels
+            .lock()
+            .unwrap()
+            .insert(conversation_id, cancel.clone());
+
+        let this = self.clone();
+        RUNTIME.spawn(async move {
+            let result = chat::stream_chat(model, history, cancel, |token| {
+                listener.on_token(token);
+            })
+            .await;
+            this.cancels.lock().unwrap().remove(&conversation_id);
+            match result {
+                Ok(full) => match this.db.insert_message(conversation_id, "assistant", &full) {
+                    Ok(message) => listener.on_complete(message),
+                    Err(e) => listener.on_error(e.to_string()),
+                },
+                Err(e) => listener.on_error(e.to_string()),
+            }
+        });
+        Ok(())
+    }
+
+    /// Replace an earlier user message, remove the later history, then stream
+    /// a new assistant response in the same conversation.
+    pub fn resend_message(
+        self: Arc<Self>,
+        conversation_id: i64,
+        message_id: i64,
+        content: String,
+        model: String,
+        listener: Arc<dyn ChatListener>,
+    ) -> Result<(), CoreError> {
+        self.db.set_conversation_model(conversation_id, &model)?;
+        self.db
+            .replace_message_and_truncate(conversation_id, message_id, &content)?;
 
         let history = self.db.get_messages(conversation_id)?;
         let cancel = Arc::new(AtomicBool::new(false));

@@ -32,6 +32,11 @@ final class AppState {
     var errorMessage: String?
     var composerDraft = ""
     var composerFocusRequest = 0
+    var editingMessageID: Int64?
+    var isMessageSearchPresented = false
+    var searchableMessages: [SearchableMessage] = []
+    var messageSearchError: String?
+    var pendingMessageJumpID: Int64?
 
     var canStartChat: Bool { ollamaStatus == .ready }
 
@@ -97,6 +102,10 @@ final class AppState {
     }
 
     private func conversationSelectionChanged() {
+        if editingMessageID != nil {
+            editingMessageID = nil
+            composerDraft = ""
+        }
         guard let core, let id = selectedConversationID else {
             messages = []
             return
@@ -111,21 +120,51 @@ final class AppState {
         }
     }
 
+    // MARK: - Message search
+
+    func presentMessageSearch() {
+        isMessageSearchPresented = true
+        messageSearchError = nil
+        guard let core else {
+            searchableMessages = []
+            messageSearchError = "Chat history is unavailable."
+            return
+        }
+        do {
+            searchableMessages = try core.listSearchableMessages()
+        } catch {
+            searchableMessages = []
+            messageSearchError = "Couldn’t load chat history."
+        }
+    }
+
+    func dismissMessageSearch() {
+        isMessageSearchPresented = false
+        messageSearchError = nil
+    }
+
+    func jump(to result: SearchableMessage) {
+        isMessageSearchPresented = false
+        messageSearchError = nil
+        if selectedConversationID != result.conversationId {
+            selectedConversationID = result.conversationId
+        }
+        pendingMessageJumpID = result.id
+    }
+
+    func completeMessageJump(_ messageID: Int64) {
+        guard pendingMessageJumpID == messageID else { return }
+        pendingMessageJumpID = nil
+    }
+
     // MARK: - Chat
 
-    func branch(from message: Message) {
-        guard let core, !isStreaming, message.role == "user" else { return }
-        do {
-            let conversation = try core.branchConversation(
-                conversationId: message.conversationId,
-                beforeMessageId: message.id)
-            conversations = try core.listConversations()
-            selectedConversationID = conversation.id
-            composerDraft = message.content
-            composerFocusRequest += 1
-        } catch {
-            report(error)
-        }
+    func edit(_ message: Message) {
+        guard !isStreaming, message.role == "user" else { return }
+        guard message.conversationId == selectedConversationID else { return }
+        editingMessageID = message.id
+        composerDraft = message.content
+        composerFocusRequest += 1
     }
 
     func send(_ text: String) {
@@ -141,12 +180,23 @@ final class AppState {
             guard let id = selectedConversationID else { return }
             isStreaming = true
             streamingText = ""
-            try core.sendMessage(
-                conversationId: id,
-                content: content,
-                model: selectedModel,
-                listener: StreamListener(state: self, conversationID: id))
-            // The user message is persisted synchronously by sendMessage.
+            let listener = StreamListener(state: self, conversationID: id)
+            if let editingMessageID {
+                try core.resendMessage(
+                    conversationId: id,
+                    messageId: editingMessageID,
+                    content: content,
+                    model: selectedModel,
+                    listener: listener)
+                self.editingMessageID = nil
+            } else {
+                try core.sendMessage(
+                    conversationId: id,
+                    content: content,
+                    model: selectedModel,
+                    listener: listener)
+            }
+            // The user message is persisted synchronously by the core.
             messages = try core.getMessages(conversationId: id)
             conversations = try core.listConversations()
         } catch {

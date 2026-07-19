@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::{Conversation, CoreError, Message};
+use crate::{Conversation, CoreError, Message, SearchableMessage};
 
 impl From<rusqlite::Error> for CoreError {
     fn from(e: rusqlite::Error) -> Self {
@@ -86,44 +86,33 @@ impl Db {
         })
     }
 
-    pub fn branch_conversation(
+    pub fn replace_message_and_truncate(
         &self,
         conversation_id: i64,
-        before_message_id: i64,
-    ) -> Result<Conversation, CoreError> {
+        message_id: i64,
+        content: &str,
+    ) -> Result<(), CoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        let model: String = tx.query_row(
-            "SELECT c.model
-             FROM conversations c
-             JOIN messages m ON m.conversation_id = c.id
-             WHERE c.id = ?1 AND m.id = ?2 AND m.role = 'user'",
-            rusqlite::params![conversation_id, before_message_id],
-            |row| row.get(0),
+        let updated = tx.execute(
+            "UPDATE messages
+             SET content = ?1, created_at = ?2
+             WHERE id = ?3 AND conversation_id = ?4 AND role = 'user'",
+            rusqlite::params![content, now(), message_id, conversation_id],
         )?;
-        let ts = now();
+        if updated == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows.into());
+        }
         tx.execute(
-            "INSERT INTO conversations (title, model, created_at, updated_at)
-             VALUES ('New Chat', ?1, ?2, ?2)",
-            rusqlite::params![model, ts],
+            "DELETE FROM messages WHERE conversation_id = ?1 AND id > ?2",
+            rusqlite::params![conversation_id, message_id],
         )?;
-        let id = tx.last_insert_rowid();
         tx.execute(
-            "INSERT INTO messages (conversation_id, role, content, created_at)
-             SELECT ?1, role, content, created_at
-             FROM messages
-             WHERE conversation_id = ?2 AND id < ?3
-             ORDER BY id ASC",
-            rusqlite::params![id, conversation_id, before_message_id],
+            "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now(), conversation_id],
         )?;
         tx.commit()?;
-        Ok(Conversation {
-            id,
-            title: "New Chat".to_string(),
-            model,
-            created_at: ts,
-            updated_at: ts,
-        })
+        Ok(())
     }
 
     pub fn delete_conversation(&self, id: i64) -> Result<(), CoreError> {
@@ -163,6 +152,29 @@ impl Db {
                 role: row.get(2)?,
                 content: row.get(3)?,
                 created_at: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn list_searchable_messages(&self) -> Result<Vec<SearchableMessage>, CoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.conversation_id, c.title, c.updated_at,
+                    m.role, m.content, m.created_at
+             FROM messages m
+             JOIN conversations c ON c.id = m.conversation_id
+             ORDER BY c.updated_at DESC, c.id DESC, m.created_at DESC, m.id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SearchableMessage {
+                id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                conversation_title: row.get(2)?,
+                conversation_updated_at: row.get(3)?,
+                role: row.get(4)?,
+                content: row.get(5)?,
+                created_at: row.get(6)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -258,6 +270,27 @@ mod tests {
     }
 
     #[test]
+    fn searchable_messages_include_conversation_metadata_and_follow_deletion() {
+        let db = db();
+        let kept = db.create_conversation("m").unwrap();
+        db.rename_conversation(kept.id, "Kept Chat").unwrap();
+        let kept_message = db.insert_message(kept.id, "user", "find me").unwrap();
+        let deleted = db.create_conversation("m").unwrap();
+        db.insert_message(deleted.id, "assistant", "remove me")
+            .unwrap();
+        db.delete_conversation(deleted.id).unwrap();
+
+        let messages = db.list_searchable_messages().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, kept_message.id);
+        assert_eq!(messages[0].conversation_id, kept.id);
+        assert_eq!(messages[0].conversation_title, "Kept Chat");
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "find me");
+        assert!(messages[0].conversation_updated_at >= kept.updated_at);
+    }
+
+    #[test]
     fn autotitle_from_first_message() {
         let db = db();
         let c = db.create_conversation("m").unwrap();
@@ -296,33 +329,39 @@ mod tests {
     }
 
     #[test]
-    fn branch_copies_only_history_before_selected_user_message() {
+    fn replacing_user_message_truncates_later_history() {
         let db = db();
-        let source = db.create_conversation("m").unwrap();
-        db.insert_message(source.id, "user", "first").unwrap();
-        db.insert_message(source.id, "assistant", "first answer")
+        let conversation = db.create_conversation("m").unwrap();
+        db.insert_message(conversation.id, "user", "first").unwrap();
+        db.insert_message(conversation.id, "assistant", "first answer")
             .unwrap();
-        let selected = db.insert_message(source.id, "user", "revise me").unwrap();
-        db.insert_message(source.id, "assistant", "old answer")
+        let selected = db
+            .insert_message(conversation.id, "user", "revise me")
+            .unwrap();
+        db.insert_message(conversation.id, "assistant", "old answer")
             .unwrap();
 
-        let branch = db.branch_conversation(source.id, selected.id).unwrap();
-        let branch_messages = db.get_messages(branch.id).unwrap();
-        assert_eq!(branch.model, "m");
-        assert_eq!(branch_messages.len(), 2);
-        assert_eq!(branch_messages[0].content, "first");
-        assert_eq!(branch_messages[1].content, "first answer");
-        assert_eq!(db.get_messages(source.id).unwrap().len(), 4);
+        db.replace_message_and_truncate(conversation.id, selected.id, "revised")
+            .unwrap();
+
+        let messages = db.get_messages(conversation.id).unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].content, "first");
+        assert_eq!(messages[1].content, "first answer");
+        assert_eq!(messages[2].content, "revised");
     }
 
     #[test]
-    fn branch_requires_a_user_message_from_the_source_conversation() {
+    fn replacing_requires_a_user_message_from_the_conversation() {
         let db = db();
-        let source = db.create_conversation("m").unwrap();
+        let conversation = db.create_conversation("m").unwrap();
         let assistant = db
-            .insert_message(source.id, "assistant", "not editable")
+            .insert_message(conversation.id, "assistant", "not editable")
             .unwrap();
 
-        assert!(db.branch_conversation(source.id, assistant.id).is_err());
+        assert!(db
+            .replace_message_and_truncate(conversation.id, assistant.id, "still not editable")
+            .is_err());
+        assert_eq!(db.get_messages(conversation.id).unwrap().len(), 1);
     }
 }
