@@ -86,6 +86,46 @@ impl Db {
         })
     }
 
+    pub fn branch_conversation(
+        &self,
+        conversation_id: i64,
+        before_message_id: i64,
+    ) -> Result<Conversation, CoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let model: String = tx.query_row(
+            "SELECT c.model
+             FROM conversations c
+             JOIN messages m ON m.conversation_id = c.id
+             WHERE c.id = ?1 AND m.id = ?2 AND m.role = 'user'",
+            rusqlite::params![conversation_id, before_message_id],
+            |row| row.get(0),
+        )?;
+        let ts = now();
+        tx.execute(
+            "INSERT INTO conversations (title, model, created_at, updated_at)
+             VALUES ('New Chat', ?1, ?2, ?2)",
+            rusqlite::params![model, ts],
+        )?;
+        let id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at)
+             SELECT ?1, role, content, created_at
+             FROM messages
+             WHERE conversation_id = ?2 AND id < ?3
+             ORDER BY id ASC",
+            rusqlite::params![id, conversation_id, before_message_id],
+        )?;
+        tx.commit()?;
+        Ok(Conversation {
+            id,
+            title: "New Chat".to_string(),
+            model,
+            created_at: ts,
+            updated_at: ts,
+        })
+    }
+
     pub fn delete_conversation(&self, id: i64) -> Result<(), CoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM conversations WHERE id = ?1", [id])?;
@@ -253,5 +293,36 @@ mod tests {
         let all = db.list_conversations().unwrap();
         assert_eq!(all[0].title, "My Chat");
         assert_eq!(all[0].model, "llama3:latest");
+    }
+
+    #[test]
+    fn branch_copies_only_history_before_selected_user_message() {
+        let db = db();
+        let source = db.create_conversation("m").unwrap();
+        db.insert_message(source.id, "user", "first").unwrap();
+        db.insert_message(source.id, "assistant", "first answer")
+            .unwrap();
+        let selected = db.insert_message(source.id, "user", "revise me").unwrap();
+        db.insert_message(source.id, "assistant", "old answer")
+            .unwrap();
+
+        let branch = db.branch_conversation(source.id, selected.id).unwrap();
+        let branch_messages = db.get_messages(branch.id).unwrap();
+        assert_eq!(branch.model, "m");
+        assert_eq!(branch_messages.len(), 2);
+        assert_eq!(branch_messages[0].content, "first");
+        assert_eq!(branch_messages[1].content, "first answer");
+        assert_eq!(db.get_messages(source.id).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn branch_requires_a_user_message_from_the_source_conversation() {
+        let db = db();
+        let source = db.create_conversation("m").unwrap();
+        let assistant = db
+            .insert_message(source.id, "assistant", "not editable")
+            .unwrap();
+
+        assert!(db.branch_conversation(source.id, assistant.id).is_err());
     }
 }

@@ -12,7 +12,12 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: 18) {
                     ForEach(state.messages) { message in
-                        MessageBubble(role: message.role, content: message.content)
+                        MessageBubble(
+                            role: message.role,
+                            content: message.content,
+                            onBranch: message.role == "user" && !state.isStreaming
+                                ? { state.branch(from: message) }
+                                : nil)
                     }
                     if state.isStreaming {
                         if let text = state.streamingText, !text.isEmpty {

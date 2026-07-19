@@ -30,6 +30,8 @@ final class AppState {
     var selectedModel = AppState.defaultModel
     var ollamaStatus = OllamaStatus.checking
     var errorMessage: String?
+    var composerDraft = ""
+    var composerFocusRequest = 0
 
     var canStartChat: Bool { ollamaStatus == .ready }
 
@@ -110,6 +112,21 @@ final class AppState {
     }
 
     // MARK: - Chat
+
+    func branch(from message: Message) {
+        guard let core, !isStreaming, message.role == "user" else { return }
+        do {
+            let conversation = try core.branchConversation(
+                conversationId: message.conversationId,
+                beforeMessageId: message.id)
+            conversations = try core.listConversations()
+            selectedConversationID = conversation.id
+            composerDraft = message.content
+            composerFocusRequest += 1
+        } catch {
+            report(error)
+        }
+    }
 
     func send(_ text: String) {
         guard let core, !isStreaming else { return }

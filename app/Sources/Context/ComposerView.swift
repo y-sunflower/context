@@ -2,17 +2,19 @@ import SwiftUI
 
 struct ComposerView: View {
     @Environment(AppState.self) private var state
-    @State private var draft = ""
     @FocusState private var focused: Bool
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !state.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
+        @Bindable var state = state
         GlassEffectContainer {
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("Message \(state.selectedModel)…", text: $draft, axis: .vertical)
+                TextField(
+                    "Message \(state.selectedModel)…", text: $state.composerDraft,
+                    axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 18))
                     .lineLimit(1...8)
@@ -36,6 +38,7 @@ struct ComposerView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
         .onAppear { focused = true }
+        .onChange(of: state.composerFocusRequest) { focused = true }
     }
 
     private func primaryAction() {
@@ -48,8 +51,8 @@ struct ComposerView: View {
 
     private func send() {
         guard canSend, !state.isStreaming else { return }
-        let text = draft
-        draft = ""
+        let text = state.composerDraft
+        state.composerDraft = ""
         state.send(text)
     }
 }

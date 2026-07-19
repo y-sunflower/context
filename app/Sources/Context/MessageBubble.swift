@@ -5,8 +5,10 @@ import SwiftUI
 struct MessageBubble: View {
     let role: String
     let content: String
+    var onBranch: (() -> Void)?
 
     @State private var hovering = false
+    @State private var hoveringActions = false
     @State private var copied = false
 
     private var isUser: Bool { role == "user" }
@@ -25,23 +27,45 @@ struct MessageBubble: View {
                         in: .rect(cornerRadius: 20, style: .continuous))
                 if !isUser { Spacer(minLength: 70) }
             }
-            copyButton
-                .opacity(hovering || copied ? 1 : 0)
+            actionButtons
+                .opacity(hovering || hoveringActions || copied ? 1 : 0.45)
+                .onHover { hoveringActions = $0 }
         }
         .onHover { hovering = $0 }
         .animation(.easeInOut(duration: 0.15), value: hovering)
         .animation(.easeInOut(duration: 0.15), value: copied)
     }
 
-    private var copyButton: some View {
-        Button(action: copy) {
-            Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                .font(.system(size: 13))
-                .labelStyle(.titleAndIcon)
+    private var actionButtons: some View {
+        HStack(spacing: 4) {
+            if let onBranch {
+                actionButton(
+                    systemImage: "arrow.triangle.branch",
+                    help: "Edit this message in a new branch",
+                    action: onBranch)
+            }
+            actionButton(
+                systemImage: copied ? "checkmark" : "doc.on.doc",
+                help: copied ? "Copied" : "Copy message",
+                action: copy)
         }
-        .buttonStyle(.glass)
-        .controlSize(.small)
-        .help("Copy message")
+    }
+
+    private func actionButton(
+        systemImage: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 26, height: 26)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .background(.quaternary, in: Circle())
+        .help(help)
     }
 
     @ViewBuilder

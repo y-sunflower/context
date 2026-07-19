@@ -98,6 +98,17 @@ impl ContextCore {
         self.db.get_messages(conversation_id)
     }
 
+    /// Create a new conversation containing the history before a selected
+    /// user message. The source conversation is left unchanged.
+    pub fn branch_conversation(
+        &self,
+        conversation_id: i64,
+        before_message_id: i64,
+    ) -> Result<Conversation, CoreError> {
+        self.db
+            .branch_conversation(conversation_id, before_message_id)
+    }
+
     /// Ask `conversation_id`'s current stream (if any) to stop. The partial
     /// response is still persisted and delivered via `on_complete`.
     pub fn cancel(&self, conversation_id: i64) {
