@@ -7,8 +7,7 @@ struct SidebarView: View {
     @FocusState private var listFocused: Bool
 
     var body: some View {
-        @Bindable var state = state
-        List(selection: $state.selectedConversationID) {
+        List(selection: conversationSelection) {
             ForEach(state.conversations) { conversation in
                 ConversationRow(conversation: conversation)
                     .tag(conversation.id)
@@ -35,11 +34,11 @@ struct SidebarView: View {
         .toolbar {
             ToolbarItem {
                 Button("New Chat", systemImage: "square.and.pencil") {
-                    state.newChat()
+                    state.newTab()
                 }
                 .buttonStyle(.glass)
                 .disabled(!state.canStartChat)
-                .help("New Chat (⌘O)")
+                .help("New Tab (⌘T)")
             }
         }
         .overlay {
@@ -65,6 +64,17 @@ struct SidebarView: View {
             }
             Button("Cancel", role: .cancel) { renameTarget = nil }
         }
+    }
+
+    private var conversationSelection: Binding<Int64?> {
+        Binding(
+            get: { state.selectedConversationID },
+            set: { conversationID in
+                if let conversationID {
+                    state.openConversation(conversationID)
+                }
+            }
+        )
     }
 }
 

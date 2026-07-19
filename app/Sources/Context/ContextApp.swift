@@ -13,9 +13,17 @@ struct ContextApp: App {
         .defaultSize(width: 980, height: 660)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Chat") { state.newChat() }
-                    .keyboardShortcut("o", modifiers: .command)
+                Button("New Tab") { state.newTab() }
+                    .keyboardShortcut("t", modifiers: .command)
                     .disabled(!state.canStartChat)
+            }
+            CommandGroup(after: .newItem) {
+                Button("Close Tab") { state.closeCurrentTab() }
+                    .keyboardShortcut("w", modifiers: .command)
+                    .disabled(state.activeTab == nil)
+                Button("Reopen Closed Tab") { state.reopenClosedTab() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(state.closedTabs.isEmpty)
             }
             CommandGroup(after: .textEditing) {
                 Button("Search Messages") { state.presentMessageSearch() }
@@ -30,6 +38,15 @@ struct ContextApp: App {
                     )
                 }
                 .keyboardShortcut("b", modifiers: .command)
+
+                Divider()
+
+                Button("Previous Tab") { state.selectAdjacentTab(offset: -1) }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                    .disabled(state.tabs.count < 2)
+                Button("Next Tab") { state.selectAdjacentTab(offset: 1) }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                    .disabled(state.tabs.count < 2)
             }
         }
 

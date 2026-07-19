@@ -54,10 +54,14 @@ struct RootView: View {
                     retryButton
                 }
             case .ready:
-                if state.selectedConversationID != nil || state.isDraftChat {
-                    ChatView()
-                } else {
-                    EmptyStateView()
+                VStack(spacing: 0) {
+                    ChatTabBar()
+                    Divider()
+                    if state.activeTab != nil {
+                        ChatView()
+                    } else {
+                        EmptyStateView()
+                    }
                 }
             }
         }
@@ -167,7 +171,7 @@ struct EmptyStateView: View {
                 .font(.system(size: 17))
                 .foregroundStyle(.secondary)
 
-            Button("New Chat") { state.newChat() }
+            Button("New Tab") { state.newTab() }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)

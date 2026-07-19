@@ -18,21 +18,14 @@ final class AppState {
     @ObservationIgnored private var database: (any ChatDatabase)?
     @ObservationIgnored private let ollama: any OllamaServing
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private var selectionTask: Task<Void, Never>?
-    @ObservationIgnored private var activeGenerationTask: Task<Void, Never>?
+    @ObservationIgnored private var selectionTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var generationTasks: [UUID: Task<Void, Never>] = [:]
 
     var conversations: [Conversation] = []
-    var selectedConversationID: Int64? {
-        didSet { conversationSelectionChanged() }
-    }
-    var messages: [Message] = []
-    var isDraftChat = false
-    var streamingText: String?
-    var streamingThinkingText: String?
-    var isStreaming = false
-    private(set) var activeGenerationConversationID: Int64?
+    var tabs: [ChatTab] = []
+    var selectedTabID: UUID?
+    private(set) var closedTabs: [ChatTab] = []
     var models: [ModelInfo] = []
-    var selectedModel: String
     var generationOptions = GenerationOptions.modelDefaults {
         didSet { persistGenerationOptions() }
     }
@@ -44,24 +37,51 @@ final class AppState {
     }
     var ollamaStatus = OllamaStatus.checking
     var errorMessage: String?
-    var composerDraft = ""
-    var composerFocusRequest = 0
     var sidebarFocusRequest = 0
-    var editingMessageID: Int64?
     var isMessageSearchPresented = false
     var searchableMessages: [SearchableMessage] = []
     var messageSearchError: String?
-    var pendingMessageJumpID: Int64?
 
     var canStartChat: Bool { ollamaStatus == .ready }
 
-    var selectedConversation: Conversation? {
-        conversations.first { $0.id == selectedConversationID }
+    var activeTab: ChatTab? {
+        guard let selectedTabID else { return nil }
+        return tabs.first { $0.id == selectedTabID }
     }
 
-    var isStreamingSelectedConversation: Bool {
-        isStreaming && activeGenerationConversationID == selectedConversationID
+    var selectedConversationID: Int64? {
+        get { activeTab?.conversationID }
+        set {
+            guard let newValue else { return }
+            openConversation(newValue)
+        }
     }
+
+    var selectedConversation: Conversation? {
+        guard let id = activeTab?.conversationID else { return nil }
+        return conversations.first { $0.id == id }
+    }
+
+    var messages: [Message] { activeTab?.messages ?? [] }
+    var isDraftChat: Bool { activeTab != nil && activeTab?.conversationID == nil }
+    var isStreaming: Bool { activeTab?.isStreaming ?? false }
+    var streamingText: String? { activeTab?.streamingText }
+    var streamingThinkingText: String? { activeTab?.streamingThinkingText }
+    var isStreamingSelectedConversation: Bool { activeTab?.isStreaming ?? false }
+
+    var selectedModel: String {
+        get { activeTab?.selectedModel ?? defaultModel }
+        set { activeTab?.selectedModel = newValue }
+    }
+
+    var composerDraft: String {
+        get { activeTab?.composerDraft ?? "" }
+        set { activeTab?.composerDraft = newValue }
+    }
+
+    var composerFocusRequest: Int { activeTab?.composerFocusRequest ?? 0 }
+    var editingMessageID: Int64? { activeTab?.editingMessageID }
+    var pendingMessageJumpID: Int64? { activeTab?.pendingMessageJumpID }
 
     init(
         defaults: UserDefaults = .standard,
@@ -79,7 +99,6 @@ final class AppState {
             defaults.string(forKey: AppState.defaultModelKey)
             ?? AppState.defaultModel
         defaultModel = savedDefaultModel
-        selectedModel = savedDefaultModel
         appearance =
             AppAppearance(
                 rawValue: defaults.string(forKey: AppState.appearanceKey) ?? "") ?? .system
@@ -106,34 +125,106 @@ final class AppState {
         Task { await bootstrap() }
     }
 
-    // MARK: - Conversations
+    // MARK: - Tabs
 
     func newChat() {
+        newTab()
+    }
+
+    func newTab() {
         guard canStartChat else { return }
-        isDraftChat = true
-        selectedConversationID = nil
-        messages = []
-        editingMessageID = nil
-        composerDraft = ""
-        selectedModel = defaultModel
-        composerFocusRequest += 1
+        let tab = ChatTab(selectedModel: defaultModel)
+        tabs.append(tab)
+        selectedTabID = tab.id
+        tab.composerFocusRequest += 1
+    }
+
+    func selectTab(_ id: UUID) {
+        guard tabs.contains(where: { $0.id == id }) else { return }
+        selectedTabID = id
+    }
+
+    func selectAdjacentTab(offset: Int) {
+        guard !tabs.isEmpty else { return }
+        guard let selectedTabID,
+            let index = tabs.firstIndex(where: { $0.id == selectedTabID })
+        else {
+            self.selectedTabID = tabs.first?.id
+            return
+        }
+        let nextIndex = (index + offset % tabs.count + tabs.count) % tabs.count
+        self.selectedTabID = tabs[nextIndex].id
+    }
+
+    func closeCurrentTab() {
+        guard let selectedTabID else { return }
+        closeTab(selectedTabID)
+    }
+
+    func closeTab(_ id: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = tabs.remove(at: index)
+        selectionTasks.removeValue(forKey: id)?.cancel()
+        generationTasks[id]?.cancel()
+        closedTabs.append(tab)
+
+        guard selectedTabID == id else { return }
+        selectedTabID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
+    }
+
+    func reopenClosedTab() {
+        guard let tab = closedTabs.popLast() else { return }
+        if let conversationID = tab.conversationID,
+            let openTab = tabs.first(where: { $0.conversationID == conversationID })
+        {
+            selectedTabID = openTab.id
+            return
+        }
+        tabs.append(tab)
+        selectedTabID = tab.id
+        tab.composerFocusRequest += 1
+    }
+
+    func tabTitle(_ tab: ChatTab) -> String {
+        guard let conversationID = tab.conversationID else { return "New Chat" }
+        return conversations.first(where: { $0.id == conversationID })?.title ?? "Chat"
+    }
+
+    // MARK: - Conversations
+
+    func openConversation(_ conversationID: Int64) {
+        if let tab = tabs.first(where: { $0.conversationID == conversationID }) {
+            selectedTabID = tab.id
+            return
+        }
+        guard let conversation = conversations.first(where: { $0.id == conversationID }) else {
+            return
+        }
+        let tab = ChatTab(
+            conversationID: conversationID,
+            selectedModel: conversation.model.isEmpty ? defaultModel : conversation.model)
+        tabs.append(tab)
+        selectedTabID = tab.id
+        loadMessages(for: tab)
     }
 
     func deleteConversation(_ conversation: Conversation) {
         guard let database else { return }
         Task {
-            if activeGenerationConversationID == conversation.id,
-                let activeGenerationTask
-            {
-                activeGenerationTask.cancel()
-                await activeGenerationTask.value
+            let matchingTabs = (tabs + closedTabs).filter {
+                $0.conversationID == conversation.id
+            }
+            let matchingTasks = matchingTabs.compactMap { generationTasks[$0.id] }
+            for tab in matchingTabs {
+                generationTasks[tab.id]?.cancel()
+            }
+            for task in matchingTasks {
+                await task.value
             }
             do {
                 try await database.deleteConversation(id: conversation.id)
                 conversations = try await database.listConversations()
-                if selectedConversationID == conversation.id {
-                    selectedConversationID = conversations.first?.id
-                }
+                removeTabs(for: conversation.id)
             } catch {
                 report(error)
             }
@@ -158,7 +249,6 @@ final class AppState {
         if let database {
             do {
                 conversations = try await database.listConversations()
-                selectedConversationID = conversations.first?.id
             } catch {
                 report(error)
             }
@@ -166,31 +256,36 @@ final class AppState {
         await refreshModels()
     }
 
-    private func conversationSelectionChanged() {
-        selectionTask?.cancel()
-        if editingMessageID != nil {
-            editingMessageID = nil
-            composerDraft = ""
-        }
-        guard let database, let id = selectedConversationID else {
-            messages = []
-            return
-        }
-        isDraftChat = false
-        if let model = selectedConversation?.model, !model.isEmpty {
-            selectedModel = model
-        }
-        selectionTask = Task {
+    private func loadMessages(for tab: ChatTab) {
+        guard let database, let conversationID = tab.conversationID else { return }
+        selectionTasks[tab.id]?.cancel()
+        selectionTasks[tab.id] = Task {
             do {
-                let loaded = try await database.getMessages(conversationId: id)
+                let loaded = try await database.getMessages(conversationId: conversationID)
                 try Task.checkCancellation()
-                guard selectedConversationID == id else { return }
-                messages = loaded
+                guard tabs.contains(where: { $0.id == tab.id }) else { return }
+                tab.messages = loaded
+                selectionTasks[tab.id] = nil
             } catch is CancellationError {
                 return
             } catch {
+                selectionTasks[tab.id] = nil
                 report(error)
             }
+        }
+    }
+
+    private func removeTabs(for conversationID: Int64) {
+        let matchingIDs = Set(
+            tabs.filter { $0.conversationID == conversationID }.map(\.id))
+        tabs.removeAll { matchingIDs.contains($0.id) }
+        closedTabs.removeAll { $0.conversationID == conversationID }
+        for id in matchingIDs {
+            selectionTasks.removeValue(forKey: id)?.cancel()
+            generationTasks.removeValue(forKey: id)?.cancel()
+        }
+        if let selectedTabID, matchingIDs.contains(selectedTabID) {
+            self.selectedTabID = tabs.first?.id
         }
     }
 
@@ -222,42 +317,41 @@ final class AppState {
     func jump(to result: SearchableMessage) {
         isMessageSearchPresented = false
         messageSearchError = nil
-        if selectedConversationID != result.conversationId {
-            selectedConversationID = result.conversationId
-        }
-        pendingMessageJumpID = result.id
+        openConversation(result.conversationId)
+        activeTab?.pendingMessageJumpID = result.id
     }
 
     func completeMessageJump(_ messageID: Int64) {
-        guard pendingMessageJumpID == messageID else { return }
-        pendingMessageJumpID = nil
+        guard activeTab?.pendingMessageJumpID == messageID else { return }
+        activeTab?.pendingMessageJumpID = nil
     }
 
     // MARK: - Chat
 
     func edit(_ message: Message) {
-        guard !isStreaming, message.role == "user" else { return }
-        guard message.conversationId == selectedConversationID else { return }
-        editingMessageID = message.id
-        composerDraft = message.content
-        composerFocusRequest += 1
+        guard let tab = activeTab, !tab.isStreaming, message.role == "user" else { return }
+        guard message.conversationId == tab.conversationID else { return }
+        tab.editingMessageID = message.id
+        tab.composerDraft = message.content
+        tab.composerFocusRequest += 1
     }
 
     func send(_ text: String) {
-        guard let database, !isStreaming else { return }
+        guard let database, let tab = activeTab, !tab.isStreaming else { return }
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
 
-        let originalConversationID = selectedConversationID
-        let editingID = editingMessageID
-        let model = selectedModel
-        let options = generationOptions
-        isStreaming = true
-        streamingText = ""
-        streamingThinkingText = ""
-        activeGenerationConversationID = originalConversationID
+        selectionTasks.removeValue(forKey: tab.id)?.cancel()
 
-        activeGenerationTask = Task {
+        let originalConversationID = tab.conversationID
+        let editingID = tab.editingMessageID
+        let model = tab.selectedModel
+        let options = generationOptions
+        tab.isStreaming = true
+        tab.streamingText = ""
+        tab.streamingThinkingText = ""
+
+        generationTasks[tab.id] = Task {
             var conversationID = originalConversationID
             var answer = ""
             var thinking = ""
@@ -266,16 +360,15 @@ final class AppState {
                     let conversation = try await database.createConversationWithMessage(
                         model: model, content: content)
                     conversationID = conversation.id
-                    activeGenerationConversationID = conversation.id
+                    tab.conversationID = conversation.id
                     conversations = try await database.listConversations()
-                    selectedConversationID = conversation.id
                 } else if let conversationID, let editingID {
                     try await database.setConversationModel(id: conversationID, model: model)
                     try await database.replaceMessageAndTruncate(
                         conversationId: conversationID,
                         messageId: editingID,
                         content: content)
-                    self.editingMessageID = nil
+                    tab.editingMessageID = nil
                 } else if let conversationID {
                     try await database.setConversationModel(id: conversationID, model: model)
                     _ = try await database.insertMessage(
@@ -288,11 +381,8 @@ final class AppState {
                 }
 
                 guard let conversationID else { return }
-                activeGenerationConversationID = conversationID
                 let history = try await database.getMessages(conversationId: conversationID)
-                if selectedConversationID == conversationID {
-                    messages = history
-                }
+                tab.messages = history
                 conversations = try await database.listConversations()
 
                 for try await event in ollama.streamChat(
@@ -301,46 +391,50 @@ final class AppState {
                     switch event {
                     case .thinking(let token):
                         thinking += token
-                        streamingThinkingText = thinking
+                        tab.streamingThinkingText = thinking
                     case .content(let token):
                         answer += token
-                        streamingText = answer
+                        tab.streamingText = answer
                     }
                 }
 
                 try await completeGeneration(
                     database: database,
+                    tab: tab,
                     conversationID: conversationID,
                     answer: answer,
                     thinking: thinking)
             } catch {
                 guard let conversationID else {
-                    handleGenerationError(error)
+                    handleGenerationError(error, tab: tab)
                     return
                 }
                 if Task.isCancelled || isCancellation(error) {
                     do {
                         try await completeGeneration(
                             database: database,
+                            tab: tab,
                             conversationID: conversationID,
                             answer: answer,
                             thinking: thinking)
                     } catch {
-                        handleGenerationError(error)
+                        handleGenerationError(error, tab: tab)
                     }
                 } else {
-                    handleGenerationError(error)
+                    handleGenerationError(error, tab: tab)
                 }
             }
         }
     }
 
     func cancelStreaming() {
-        activeGenerationTask?.cancel()
+        guard let tab = activeTab else { return }
+        generationTasks[tab.id]?.cancel()
     }
 
     private func completeGeneration(
         database: any ChatDatabase,
+        tab: ChatTab,
         conversationID: Int64,
         answer: String,
         thinking: String
@@ -350,23 +444,19 @@ final class AppState {
             role: "assistant",
             content: answer,
             thinking: thinking.isEmpty ? nil : thinking)
-        isStreaming = false
-        activeGenerationConversationID = nil
-        activeGenerationTask = nil
-        streamingText = nil
-        streamingThinkingText = nil
-        if conversationID == selectedConversationID {
-            messages.append(message)
-        }
+        tab.isStreaming = false
+        tab.streamingText = nil
+        tab.streamingThinkingText = nil
+        tab.messages.append(message)
+        generationTasks[tab.id] = nil
         conversations = try await database.listConversations()
     }
 
-    private func handleGenerationError(_ error: Error) {
-        isStreaming = false
-        activeGenerationConversationID = nil
-        activeGenerationTask = nil
-        streamingText = nil
-        streamingThinkingText = nil
+    private func handleGenerationError(_ error: Error, tab: ChatTab) {
+        tab.isStreaming = false
+        tab.streamingText = nil
+        tab.streamingThinkingText = nil
+        generationTasks[tab.id] = nil
         report(error)
     }
 
@@ -381,12 +471,8 @@ final class AppState {
             if !models.contains(where: { $0.name == defaultModel }), let first = models.first {
                 defaultModel = first.name
             }
-            if selectedConversationID == nil {
-                selectedModel = defaultModel
-            } else if !models.contains(where: { $0.name == selectedModel }),
-                let first = models.first
-            {
-                selectedModel = first.name
+            for tab in tabs where !models.contains(where: { $0.name == tab.selectedModel }) {
+                tab.selectedModel = defaultModel
             }
             ollamaStatus = .ready
         } catch {
