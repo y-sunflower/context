@@ -71,7 +71,7 @@ struct ChatView: View {
         .safeAreaInset(edge: .bottom) {
             ComposerView()
         }
-        .navigationTitle(state.selectedConversation?.title ?? "Context")
+        .navigationTitle(state.selectedConversation?.title ?? "New Chat")
         .navigationSubtitle(state.selectedModel)
         .toolbar {
             ToolbarItem {

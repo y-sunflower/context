@@ -90,8 +90,13 @@ impl ContextCore {
         self.db.list_conversations()
     }
 
-    pub fn create_conversation(&self, model: String) -> Result<Conversation, CoreError> {
-        self.db.create_conversation(&model)
+    /// Persist a new conversation and its first user message atomically.
+    pub fn create_conversation_with_message(
+        &self,
+        model: String,
+        content: String,
+    ) -> Result<Conversation, CoreError> {
+        self.db.create_conversation_with_message(&model, &content)
     }
 
     pub fn delete_conversation(&self, conversation_id: i64) -> Result<(), CoreError> {
@@ -135,29 +140,18 @@ impl ContextCore {
         self.db.insert_message(conversation_id, "user", &content)?;
         self.db.maybe_autotitle(conversation_id, &content)?;
 
-        let history = self.db.get_messages(conversation_id)?;
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.cancels
-            .lock()
-            .unwrap()
-            .insert(conversation_id, cancel.clone());
+        self.generate_reply(conversation_id, model, listener)
+    }
 
-        let this = self.clone();
-        RUNTIME.spawn(async move {
-            let result = chat::stream_chat(model, history, cancel, |token| {
-                listener.on_token(token);
-            })
-            .await;
-            this.cancels.lock().unwrap().remove(&conversation_id);
-            match result {
-                Ok(full) => match this.db.insert_message(conversation_id, "assistant", &full) {
-                    Ok(message) => listener.on_complete(message),
-                    Err(e) => listener.on_error(e.to_string()),
-                },
-                Err(e) => listener.on_error(e.to_string()),
-            }
-        });
-        Ok(())
+    /// Stream a reply using the conversation's already-persisted history.
+    pub fn generate_reply(
+        self: Arc<Self>,
+        conversation_id: i64,
+        model: String,
+        listener: Arc<dyn ChatListener>,
+    ) -> Result<(), CoreError> {
+        self.db.set_conversation_model(conversation_id, &model)?;
+        self.spawn_reply(conversation_id, model, listener)
     }
 
     /// Replace an earlier user message, remove the later history, then stream
@@ -174,6 +168,17 @@ impl ContextCore {
         self.db
             .replace_message_and_truncate(conversation_id, message_id, &content)?;
 
+        self.spawn_reply(conversation_id, model, listener)
+    }
+}
+
+impl ContextCore {
+    fn spawn_reply(
+        self: Arc<Self>,
+        conversation_id: i64,
+        model: String,
+        listener: Arc<dyn ChatListener>,
+    ) -> Result<(), CoreError> {
         let history = self.db.get_messages(conversation_id)?;
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancels

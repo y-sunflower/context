@@ -33,16 +33,13 @@ fn main() {
     let prompt = args.next().expect("missing prompt");
 
     let core = ContextCore::new(db_path).expect("open db");
-    let conversation = core.create_conversation(model.clone()).expect("create");
+    let conversation = core
+        .create_conversation_with_message(model.clone(), prompt)
+        .expect("create");
     let (tx, rx) = mpsc::channel();
 
     core.clone()
-        .send_message(
-            conversation.id,
-            prompt,
-            model,
-            Arc::new(PrintListener { done: tx }),
-        )
+        .generate_reply(conversation.id, model, Arc::new(PrintListener { done: tx }))
         .expect("send");
 
     match rx.recv_timeout(std::time::Duration::from_secs(300)) {

@@ -18,6 +18,14 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 
+fn title_from_message(content: &str) -> String {
+    let mut title = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.chars().count() > 60 {
+        title = title.chars().take(60).collect::<String>() + "…";
+    }
+    title
+}
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -44,7 +52,12 @@ impl Db {
                 created_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_messages_conversation
-                ON messages(conversation_id);",
+                ON messages(conversation_id);
+            DELETE FROM conversations
+            WHERE NOT EXISTS (
+                SELECT 1 FROM messages
+                WHERE messages.conversation_id = conversations.id
+            );",
         )?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -55,7 +68,12 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, model, created_at, updated_at
-             FROM conversations ORDER BY updated_at DESC, id DESC",
+             FROM conversations
+             WHERE EXISTS (
+                 SELECT 1 FROM messages
+                 WHERE messages.conversation_id = conversations.id
+             )
+             ORDER BY updated_at DESC, id DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Conversation {
@@ -69,7 +87,8 @@ impl Db {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn create_conversation(&self, model: &str) -> Result<Conversation, CoreError> {
+    #[cfg(test)]
+    fn create_conversation(&self, model: &str) -> Result<Conversation, CoreError> {
         let conn = self.conn.lock().unwrap();
         let ts = now();
         conn.execute(
@@ -80,6 +99,36 @@ impl Db {
         Ok(Conversation {
             id: conn.last_insert_rowid(),
             title: "New Chat".to_string(),
+            model: model.to_string(),
+            created_at: ts,
+            updated_at: ts,
+        })
+    }
+
+    pub fn create_conversation_with_message(
+        &self,
+        model: &str,
+        content: &str,
+    ) -> Result<Conversation, CoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let ts = now();
+        let title = title_from_message(content);
+        tx.execute(
+            "INSERT INTO conversations (title, model, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3)",
+            rusqlite::params![title, model, ts],
+        )?;
+        let conversation_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at)
+             VALUES (?1, 'user', ?2, ?3)",
+            rusqlite::params![conversation_id, content, ts],
+        )?;
+        tx.commit()?;
+        Ok(Conversation {
+            id: conversation_id,
+            title,
             model: model.to_string(),
             created_at: ts,
             updated_at: ts,
@@ -219,10 +268,7 @@ impl Db {
             )
             .optional()?;
         if title.as_deref() == Some("New Chat") {
-            let mut derived: String = content.split_whitespace().collect::<Vec<_>>().join(" ");
-            if derived.chars().count() > 60 {
-                derived = derived.chars().take(60).collect::<String>() + "…";
-            }
+            let derived = title_from_message(content);
             if !derived.is_empty() {
                 conn.execute(
                     "UPDATE conversations SET title = ?1 WHERE id = ?2",
@@ -243,14 +289,64 @@ mod tests {
     }
 
     #[test]
-    fn create_and_list_conversations() {
+    fn empty_conversations_are_not_listed() {
         let db = db();
         let a = db.create_conversation("gemma4:26b").unwrap();
         assert_eq!(a.title, "New Chat");
         assert_eq!(a.model, "gemma4:26b");
+        assert!(db.list_conversations().unwrap().is_empty());
+
+        db.insert_message(a.id, "user", "hello").unwrap();
         let all = db.list_conversations().unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, a.id);
+    }
+
+    #[test]
+    fn first_message_creation_is_atomic() {
+        let db = db();
+        let conversation = db
+            .create_conversation_with_message("gemma4:26b", "explain rust lifetimes")
+            .unwrap();
+
+        let conversations = db.list_conversations().unwrap();
+        let messages = db.get_messages(conversation.id).unwrap();
+        assert_eq!(conversations.len(), 1);
+        assert_eq!(conversations[0].title, "explain rust lifetimes");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "explain rust lifetimes");
+    }
+
+    #[test]
+    fn reopening_deletes_legacy_empty_conversations() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("context-core-{unique}.db"));
+        {
+            let db = Db::open(path.to_str().unwrap()).unwrap();
+            db.create_conversation("m").unwrap();
+            let count: i64 = db
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM conversations", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+
+        let reopened = Db::open(path.to_str().unwrap()).unwrap();
+        let count: i64 = reopened
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM conversations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+        drop(reopened);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -294,6 +390,8 @@ mod tests {
     fn autotitle_from_first_message() {
         let db = db();
         let c = db.create_conversation("m").unwrap();
+        db.insert_message(c.id, "user", "explain lifetimes in rust")
+            .unwrap();
         db.maybe_autotitle(c.id, "explain lifetimes in rust")
             .unwrap();
         let all = db.list_conversations().unwrap();
@@ -311,6 +409,8 @@ mod tests {
     fn autotitle_truncates_long_content() {
         let db = db();
         let c = db.create_conversation("m").unwrap();
+        db.insert_message(c.id, "user", &"word ".repeat(40))
+            .unwrap();
         db.maybe_autotitle(c.id, &"word ".repeat(40)).unwrap();
         let title = db.list_conversations().unwrap()[0].title.clone();
         assert!(title.chars().count() <= 61);
@@ -321,6 +421,7 @@ mod tests {
     fn rename_and_set_model() {
         let db = db();
         let c = db.create_conversation("m").unwrap();
+        db.insert_message(c.id, "user", "hello").unwrap();
         db.rename_conversation(c.id, "My Chat").unwrap();
         db.set_conversation_model(c.id, "llama3:latest").unwrap();
         let all = db.list_conversations().unwrap();

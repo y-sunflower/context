@@ -40,6 +40,10 @@ struct ComposerView: View {
         .padding(.bottom, 12)
         .onAppear { focused = true }
         .onChange(of: state.composerFocusRequest) { focused = true }
+        .onExitCommand {
+            focused = false
+            state.sidebarFocusRequest += 1
+        }
     }
 
     private func primaryAction() {

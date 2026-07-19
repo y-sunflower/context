@@ -5,6 +5,7 @@ struct SidebarView: View {
     @Environment(AppState.self) private var state
     @State private var renameTarget: Conversation?
     @State private var renameText = ""
+    @FocusState private var listFocused: Bool
 
     var body: some View {
         @Bindable var state = state
@@ -22,6 +23,13 @@ struct SidebarView: View {
                             state.deleteConversation(conversation)
                         }
                     }
+            }
+        }
+        .focused($listFocused)
+        .onChange(of: state.sidebarFocusRequest) {
+            Task { @MainActor in
+                await Task.yield()
+                listFocused = true
             }
         }
         .navigationTitle("Chats")

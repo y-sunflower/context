@@ -8,6 +8,8 @@ extension Message: Identifiable {}
 @Observable @MainActor
 final class AppState {
     static let defaultModel = "gemma4:26b"
+    private static let appearanceKey = "appearance"
+    private static let defaultModelKey = "defaultModel"
 
     enum OllamaStatus: Equatable {
         case checking
@@ -17,21 +19,30 @@ final class AppState {
     }
 
     @ObservationIgnored private var core: ContextCore?
+    @ObservationIgnored private let defaults: UserDefaults
 
     var conversations: [Conversation] = []
     var selectedConversationID: Int64? {
         didSet { conversationSelectionChanged() }
     }
     var messages: [Message] = []
+    var isDraftChat = false
     /// Assistant text accumulated so far for the in-flight response.
     var streamingText: String?
     var isStreaming = false
     var models: [ModelInfo] = []
-    var selectedModel = AppState.defaultModel
+    var selectedModel: String
+    var defaultModel: String {
+        didSet { defaults.set(defaultModel, forKey: AppState.defaultModelKey) }
+    }
+    var appearance: AppAppearance {
+        didSet { defaults.set(appearance.rawValue, forKey: AppState.appearanceKey) }
+    }
     var ollamaStatus = OllamaStatus.checking
     var errorMessage: String?
     var composerDraft = ""
     var composerFocusRequest = 0
+    var sidebarFocusRequest = 0
     var editingMessageID: Int64?
     var isMessageSearchPresented = false
     var searchableMessages: [SearchableMessage] = []
@@ -44,7 +55,14 @@ final class AppState {
         conversations.first { $0.id == selectedConversationID }
     }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let savedDefaultModel = defaults.string(forKey: AppState.defaultModelKey)
+            ?? AppState.defaultModel
+        defaultModel = savedDefaultModel
+        selectedModel = savedDefaultModel
+        appearance = AppAppearance(
+            rawValue: defaults.string(forKey: AppState.appearanceKey) ?? "") ?? .system
         do {
             let support = try FileManager.default.url(
                 for: .applicationSupportDirectory, in: .userDomainMask,
@@ -65,14 +83,14 @@ final class AppState {
     // MARK: - Conversations
 
     func newChat() {
-        guard let core, canStartChat else { return }
-        do {
-            let conversation = try core.createConversation(model: selectedModel)
-            conversations = try core.listConversations()
-            selectedConversationID = conversation.id
-        } catch {
-            report(error)
-        }
+        guard canStartChat else { return }
+        isDraftChat = true
+        selectedConversationID = nil
+        messages = []
+        editingMessageID = nil
+        composerDraft = ""
+        selectedModel = defaultModel
+        composerFocusRequest += 1
     }
 
     func deleteConversation(_ conversation: Conversation) {
@@ -110,6 +128,7 @@ final class AppState {
             messages = []
             return
         }
+        isDraftChat = false
         do {
             messages = try core.getMessages(conversationId: id)
             if let model = selectedConversation?.model, !model.isEmpty {
@@ -172,8 +191,11 @@ final class AppState {
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
         do {
+            let isNewConversation = selectedConversationID == nil
             if selectedConversationID == nil {
-                let conversation = try core.createConversation(model: selectedModel)
+                let conversation = try core.createConversationWithMessage(
+                    model: selectedModel,
+                    content: content)
                 conversations = try core.listConversations()
                 selectedConversationID = conversation.id
             }
@@ -181,7 +203,12 @@ final class AppState {
             isStreaming = true
             streamingText = ""
             let listener = StreamListener(state: self, conversationID: id)
-            if let editingMessageID {
+            if isNewConversation {
+                try core.generateReply(
+                    conversationId: id,
+                    model: selectedModel,
+                    listener: listener)
+            } else if let editingMessageID {
                 try core.resendMessage(
                     conversationId: id,
                     messageId: editingMessageID,
@@ -220,7 +247,12 @@ final class AppState {
                 ollamaStatus = .noModels
                 return
             }
-            if !models.contains(where: { $0.name == selectedModel }),
+            if !models.contains(where: { $0.name == defaultModel }), let first = models.first {
+                defaultModel = first.name
+            }
+            if selectedConversationID == nil {
+                selectedModel = defaultModel
+            } else if !models.contains(where: { $0.name == selectedModel }),
                 let first = models.first
             {
                 selectedModel = first.name

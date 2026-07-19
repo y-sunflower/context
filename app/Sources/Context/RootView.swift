@@ -2,10 +2,11 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppState.self) private var state
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     var body: some View {
         @Bindable var state = state
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 340)
         } detail: {
@@ -53,7 +54,7 @@ struct RootView: View {
                     retryButton
                 }
             case .ready:
-                if state.selectedConversationID != nil {
+                if state.selectedConversationID != nil || state.isDraftChat {
                     ChatView()
                 } else {
                     EmptyStateView()
@@ -68,6 +69,19 @@ struct RootView: View {
             }
         }
         .animation(.easeOut(duration: 0.14), value: state.isMessageSearchPresented)
+        .preferredColorScheme(state.appearance.colorScheme)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                SettingsLink {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .buttonStyle(.glass)
+                .help("Settings (⌘,)")
+            }
+        }
+        .onChange(of: state.sidebarFocusRequest) {
+            columnVisibility = .all
+        }
         .alert(
             "Something went wrong",
             isPresented: Binding(

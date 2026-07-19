@@ -32,5 +32,11 @@ struct ContextApp: App {
                 .keyboardShortcut("b", modifiers: .command)
             }
         }
+
+        Settings {
+            SettingsView()
+                .environment(state)
+                .preferredColorScheme(state.appearance.colorScheme)
+        }
     }
 }
